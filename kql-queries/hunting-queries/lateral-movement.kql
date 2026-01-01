@@ -1,0 +1,148 @@
+// Lateral Movement Hunting Query
+// Detects patterns consistent with lateral movement such as remote execution and pass-the-hash
+// MITRE ATT&CK: T1021 - Remote Services
+// MITRE ATT&CK: T1550 - Use Alternate Authentication Material
+// Author: SOC Lab
+// Use Case: Identify potential lateral movement between systems
+
+let LookbackHours = 24;
+
+// Detection 1: Network logons followed by privileged activity
+let TimeFilter = ago(LookbackHours * 1h);
+
+let RemoteLogons = SecurityEvent
+| where TimeGenerated > TimeFilter
+| where EventID == 4624
+| where LogonType == 3  // Network logon
+| where IpAddress != "-" and IpAddress != "" and IpAddress != "127.0.0.1"
+| project 
+    LogonTime = TimeGenerated,
+    TargetComputer = Computer,
+    Account = TargetUserName,
+    SourceIP = IpAddress,
+    LogonID = TargetLogonId;
+
+let PrivilegedActions = SecurityEvent
+| where TimeGenerated > TimeFilter
+| where EventID in (
+    4672,  // Special privileges assigned
+    4688,  // Process creation
+    4697,  // Service installed
+    4698   // Scheduled task created
+)
+| project 
+    ActionTime = TimeGenerated,
+    Computer,
+    Account = TargetUserName,
+    EventID,
+    Activity;
+
+RemoteLogons
+| join kind=inner PrivilegedActions on $left.TargetComputer == $right.Computer, Account
+| where ActionTime between (LogonTime .. (LogonTime + 10m))
+| summarize 
+    Events = count(),
+    Actions = make_set(Activity, 10),
+    EventIDs = make_set(EventID),
+    TimeSpan = max(ActionTime) - min(LogonTime)
+    by TargetComputer, Account, SourceIP
+| where Events >= 2
+| extend ThreatType = "Remote Logon + Privileged Action"
+| project 
+    TargetComputer,
+    Account,
+    SourceIP,
+    ThreatType,
+    Events,
+    Actions,
+    TimeSpan
+
+// UNION: Detection 2: One account accessing multiple systems
+| union (
+    SecurityEvent
+    | where TimeGenerated > ago(LookbackHours * 1h)
+    | where EventID == 4624
+    | where LogonType == 3
+    | where IpAddress != "-" and IpAddress != ""
+    | summarize 
+        TargetSystems = dcount(Computer),
+        Systems = make_set(Computer, 20),
+        SourceIPs = make_set(IpAddress, 10),
+        FirstAccess = min(TimeGenerated),
+        LastAccess = max(TimeGenerated)
+        by Account = TargetUserName
+    | where TargetSystems >= 3  // Accessed 3+ systems
+    | extend 
+        TimeSpan = LastAccess - FirstAccess,
+        ThreatType = "Multi-System Access"
+    | where TimeSpan <= 1h  // Within 1 hour - rapid movement
+    | project 
+        TargetComputer = strcat(TargetSystems, " systems"),
+        Account,
+        SourceIP = tostring(SourceIPs[0]),
+        ThreatType,
+        Events = toint(TargetSystems),
+        Actions = Systems,
+        TimeSpan
+)
+
+// UNION: Detection 3: Remote service/task creation
+| union (
+    SecurityEvent
+    | where TimeGenerated > ago(LookbackHours * 1h)
+    | where EventID in (
+        4697,  // Service installed
+        4698,  // Scheduled task created
+        4702   // Scheduled task updated
+    )
+    | where SubjectUserName != "SYSTEM"
+    | project 
+        TimeGenerated,
+        TargetComputer = Computer,
+        Account = SubjectUserName,
+        EventID,
+        ServiceName = tostring(ServiceName),
+        TaskName = tostring(TaskName)
+    | extend 
+        ThreatType = case(
+            EventID == 4697, "Remote Service Installation",
+            EventID == 4698, "Remote Scheduled Task Creation",
+            "Scheduled Task Modification"
+        )
+    | summarize 
+        Events = count(),
+        Items = make_set(coalesce(ServiceName, TaskName), 10)
+        by TargetComputer, Account, ThreatType
+    | project 
+        TargetComputer,
+        Account,
+        SourceIP = "Local",
+        ThreatType,
+        Events,
+        Actions = Items,
+        TimeSpan = time(0)
+)
+
+// UNION: Detection 4: Pass-the-hash indicators (NTLM from unusual sources)
+| union (
+    SecurityEvent
+    | where TimeGenerated > ago(LookbackHours * 1h)
+    | where EventID == 4624
+    | where LogonType == 3
+    | where AuthenticationPackageName == "NTLM"
+    | where LmPackageName has "NTLM V1"  // Older, more exploitable
+    | summarize 
+        Events = count(),
+        Sources = make_set(IpAddress, 10)
+        by TargetComputer = Computer, Account = TargetUserName
+    | where Events >= 5
+    | project 
+        TargetComputer,
+        Account,
+        SourceIP = tostring(Sources[0]),
+        ThreatType = "NTLM V1 Authentication (Potential Pass-the-Hash)",
+        Events,
+        Actions = Sources,
+        TimeSpan = time(0)
+)
+| order by Events desc

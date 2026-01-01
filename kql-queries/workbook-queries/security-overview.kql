@@ -1,0 +1,185 @@
+// Security Overview Dashboard Queries
+// A collection of KQL queries for the Security Overview workbook
+// Author: SOC Lab
+// Use Case: High-level security monitoring dashboard
+
+//=============================================================================
+// QUERY 1: Failed Login Attempts Count (Tile)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| summarize FailedLogins = count()
+
+//=============================================================================
+// QUERY 2: Successful Login Attempts Count (Tile)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4624
+| where LogonType in (2, 10)  // Interactive and RDP
+| summarize SuccessfulLogins = count()
+
+//=============================================================================
+// QUERY 3: Unique Attacking IPs Count (Tile)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| where IpAddress != "-"
+| summarize UniqueAttackers = dcount(IpAddress)
+
+//=============================================================================
+// QUERY 4: Active Incidents Count (Tile)
+//=============================================================================
+SecurityIncident
+| where TimeGenerated {TimeRange}
+| where Status in ("New", "Active")
+| summarize ActiveIncidents = count()
+
+//=============================================================================
+// QUERY 5: Login Attempts Over Time (Area Chart)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID in (4624, 4625)
+| summarize 
+    SuccessfulLogins = countif(EventID == 4624 and LogonType in (2, 10)),
+    FailedLogins = countif(EventID == 4625)
+    by bin(TimeGenerated, 1h)
+| order by TimeGenerated asc
+
+//=============================================================================
+// QUERY 6: Top 10 Attacking IPs (Table)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| where IpAddress != "-"
+| summarize 
+    Attempts = count(),
+    TargetAccounts = dcount(TargetUserName),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated)
+    by IpAddress
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend Country = tostring(GeoInfo.country)
+| top 10 by Attempts desc
+| project 
+    IpAddress,
+    Country,
+    Attempts,
+    TargetAccounts,
+    FirstSeen,
+    LastSeen
+
+//=============================================================================
+// QUERY 7: Most Targeted Accounts (Bar Chart)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| summarize AttackCount = count() by TargetUserName
+| top 10 by AttackCount desc
+
+//=============================================================================
+// QUERY 8: Attack Methods Distribution (Pie Chart)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| extend AttackType = case(
+    LogonType == 10, "RDP Brute Force",
+    LogonType == 3, "Network Attack",
+    LogonType == 8, "Network Clear Text",
+    LogonType == 2, "Interactive",
+    "Other"
+)
+| summarize Count = count() by AttackType
+
+//=============================================================================
+// QUERY 9: Incidents by Severity (Donut Chart)
+//=============================================================================
+SecurityIncident
+| where TimeGenerated {TimeRange}
+| summarize Count = count() by Severity
+| order by case(
+    Severity == "High", 1,
+    Severity == "Medium", 2,
+    Severity == "Low", 3,
+    4
+) asc
+
+//=============================================================================
+// QUERY 10: Security Events by Type (Table)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| summarize EventCount = count() by EventID, Activity
+| top 20 by EventCount desc
+| project 
+    EventID,
+    Activity,
+    EventCount,
+    Percentage = round(100.0 * EventCount / toscalar(
+        SecurityEvent 
+        | where TimeGenerated {TimeRange} 
+        | count
+    ), 2)
+
+//=============================================================================
+// QUERY 11: Hourly Attack Pattern (Heatmap)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| extend 
+    Hour = datetime_part("hour", TimeGenerated),
+    DayOfWeek = case(
+        dayofweek(TimeGenerated) == 0d, "Sunday",
+        dayofweek(TimeGenerated) == 1d, "Monday",
+        dayofweek(TimeGenerated) == 2d, "Tuesday",
+        dayofweek(TimeGenerated) == 3d, "Wednesday",
+        dayofweek(TimeGenerated) == 4d, "Thursday",
+        dayofweek(TimeGenerated) == 5d, "Friday",
+        dayofweek(TimeGenerated) == 6d, "Saturday",
+        "Unknown"
+    )
+| summarize Attacks = count() by DayOfWeek, Hour
+| order by case(
+    DayOfWeek == "Monday", 1,
+    DayOfWeek == "Tuesday", 2,
+    DayOfWeek == "Wednesday", 3,
+    DayOfWeek == "Thursday", 4,
+    DayOfWeek == "Friday", 5,
+    DayOfWeek == "Saturday", 6,
+    DayOfWeek == "Sunday", 7,
+    8
+) asc, Hour asc
+
+//=============================================================================
+// QUERY 12: Data Ingestion Volume (Line Chart)
+//=============================================================================
+Usage
+| where TimeGenerated {TimeRange}
+| summarize 
+    DataIngestedMB = sum(Quantity)
+    by bin(TimeGenerated, 1d), DataType
+| where DataType in ("SecurityEvent", "SigninLogs", "AuditLogs")
+| order by TimeGenerated asc
+
+//=============================================================================
+// QUERY 13: Recent High Severity Incidents (Table)
+//=============================================================================
+SecurityIncident
+| where TimeGenerated {TimeRange}
+| where Severity in ("High", "Critical")
+| project 
+    TimeGenerated,
+    Title,
+    Severity,
+    Status,
+    Owner = OwnerName,
+    AlertCount = AlertsCount
+| order by TimeGenerated desc
+| take 10

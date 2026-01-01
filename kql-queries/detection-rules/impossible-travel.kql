@@ -1,0 +1,78 @@
+// Impossible Travel Detection
+// Detects user logins from geographically distant locations within a short time period
+// MITRE ATT&CK: T1078 - Valid Accounts
+// Severity: High
+// Frequency: Run every 15 minutes
+// Note: Requires geo-enriched data or Azure AD Sign-in logs
+
+// Option 1: Using Azure AD Sign-in Logs (if available)
+SigninLogs
+| where TimeGenerated > ago(24h)
+| where ResultType == 0  // Successful sign-in
+| project 
+    TimeGenerated,
+    UserPrincipalName,
+    IPAddress,
+    Location,
+    City = tostring(LocationDetails.city),
+    Country = tostring(LocationDetails.countryOrRegion),
+    Latitude = toreal(LocationDetails.geoCoordinates.latitude),
+    Longitude = toreal(LocationDetails.geoCoordinates.longitude)
+| order by UserPrincipalName, TimeGenerated asc
+| serialize
+| extend 
+    PrevTime = prev(TimeGenerated, 1),
+    PrevIP = prev(IPAddress, 1),
+    PrevCity = prev(City, 1),
+    PrevCountry = prev(Country, 1),
+    PrevLatitude = prev(Latitude, 1),
+    PrevLongitude = prev(Longitude, 1),
+    PrevUser = prev(UserPrincipalName, 1)
+| where UserPrincipalName == PrevUser
+| where IPAddress != PrevIP
+| extend TimeDiff = datetime_diff('minute', TimeGenerated, PrevTime)
+| where TimeDiff <= 60  // Within 1 hour
+| extend 
+    // Haversine formula approximation for distance
+    Distance = geo_distance_2points(Longitude, Latitude, PrevLongitude, PrevLatitude) / 1000  // in km
+| where Distance > 500  // More than 500 km apart
+| extend 
+    RequiredSpeed = Distance / (TimeDiff / 60.0),  // km/h
+    ImpossibleTravel = RequiredSpeed > 1000  // Faster than commercial flight
+| where ImpossibleTravel == true
+| project 
+    TimeGenerated,
+    UserPrincipalName,
+    CurrentIP = IPAddress,
+    CurrentLocation = strcat(City, ", ", Country),
+    PreviousIP = PrevIP,
+    PreviousLocation = strcat(PrevCity, ", ", PrevCountry),
+    TimeDifferenceMinutes = TimeDiff,
+    DistanceKm = round(Distance, 0),
+    RequiredSpeedKmh = round(RequiredSpeed, 0)
+
+
+// Option 2: Using Security Events with manual geo-lookup
+// Uncomment below if using Security Events instead of Sign-in Logs
+/*
+SecurityEvent
+| where TimeGenerated > ago(24h)
+| where EventID == 4624
+| where LogonType in (2, 10)  // Interactive or RDP
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend 
+    City = tostring(GeoInfo.city),
+    Country = tostring(GeoInfo.country),
+    Latitude = toreal(GeoInfo.latitude),
+    Longitude = toreal(GeoInfo.longitude)
+| project 
+    TimeGenerated,
+    Account = TargetUserName,
+    IpAddress,
+    City,
+    Country,
+    Latitude,
+    Longitude,
+    Computer
+| order by Account, TimeGenerated asc
+*/

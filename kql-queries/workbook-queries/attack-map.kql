@@ -1,0 +1,218 @@
+// Attack Map Dashboard Queries
+// A collection of KQL queries for geographic attack visualization
+// Author: SOC Lab
+// Use Case: Visualize attack origins on a world map
+
+//=============================================================================
+// QUERY 1: Attack Origins with Geo Data (Map)
+// Primary query for world map visualization
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625  // Failed logins
+| where IpAddress != "-" 
+| where IpAddress != "" 
+| where IpAddress !startswith "10."
+| where IpAddress !startswith "192.168."
+| where IpAddress !startswith "172.16."
+| where IpAddress !startswith "127."
+| summarize AttackCount = count() by IpAddress
+| top 500 by AttackCount  // Limit for performance
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend 
+    Country = tostring(GeoInfo.country),
+    State = tostring(GeoInfo.state),
+    City = tostring(GeoInfo.city),
+    Latitude = toreal(GeoInfo.latitude),
+    Longitude = toreal(GeoInfo.longitude)
+| where isnotempty(Latitude) and isnotempty(Longitude)
+| project 
+    IpAddress,
+    AttackCount,
+    Country,
+    State,
+    City,
+    Latitude,
+    Longitude
+| order by AttackCount desc
+
+//=============================================================================
+// QUERY 2: Attacks by Country (Bar Chart)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| where IpAddress != "-" and IpAddress != ""
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend Country = tostring(GeoInfo.country)
+| where isnotempty(Country)
+| summarize 
+    TotalAttacks = count(),
+    UniqueIPs = dcount(IpAddress)
+    by Country
+| order by TotalAttacks desc
+| take 15
+
+//=============================================================================
+// QUERY 3: Top Cities (Table)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| where IpAddress != "-"
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend 
+    Country = tostring(GeoInfo.country),
+    City = tostring(GeoInfo.city)
+| where isnotempty(City)
+| summarize 
+    Attacks = count(),
+    UniqueIPs = dcount(IpAddress),
+    SampleIPs = make_set(IpAddress, 3)
+    by City, Country
+| order by Attacks desc
+| take 20
+
+//=============================================================================
+// QUERY 4: Attack Timeline by Country (Stacked Area Chart)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| where IpAddress != "-"
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend Country = tostring(GeoInfo.country)
+| where Country in (
+    toscalar(
+        SecurityEvent
+        | where TimeGenerated {TimeRange}
+        | where EventID == 4625
+        | where IpAddress != "-"
+        | extend GeoInfo = geo_info_from_ip_address(IpAddress)
+        | extend Country = tostring(GeoInfo.country)
+        | summarize count() by Country
+        | top 5 by count_
+        | summarize make_set(Country)
+    )
+)
+| summarize Attacks = count() by bin(TimeGenerated, 1h), Country
+| order by TimeGenerated asc
+
+//=============================================================================
+// QUERY 5: New Countries Today (Table)
+// Countries attacking today that weren't seen yesterday
+//=============================================================================
+let TodayCountries = SecurityEvent
+| where TimeGenerated > ago(24h)
+| where EventID == 4625
+| where IpAddress != "-"
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend Country = tostring(GeoInfo.country)
+| where isnotempty(Country)
+| distinct Country;
+
+let YesterdayCountries = SecurityEvent
+| where TimeGenerated between (ago(48h) .. ago(24h))
+| where EventID == 4625
+| where IpAddress != "-"
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend Country = tostring(GeoInfo.country)
+| where isnotempty(Country)
+| distinct Country;
+
+TodayCountries
+| where Country !in (YesterdayCountries)
+| join kind=inner (
+    SecurityEvent
+    | where TimeGenerated > ago(24h)
+    | where EventID == 4625
+    | where IpAddress != "-"
+    | extend GeoInfo = geo_info_from_ip_address(IpAddress)
+    | extend Country = tostring(GeoInfo.country)
+    | summarize 
+        Attacks = count(),
+        IPs = make_set(IpAddress, 5)
+        by Country
+) on Country
+| project 
+    Country,
+    Attacks,
+    SampleIPs = IPs,
+    Status = "New Today"
+
+//=============================================================================
+// QUERY 6: Geographic Diversity Score (Tile)
+// Number of unique countries attacking
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| where IpAddress != "-"
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend Country = tostring(GeoInfo.country)
+| where isnotempty(Country)
+| summarize Countries = dcount(Country)
+
+//=============================================================================
+// QUERY 7: Attack Intensity by Region (Treemap)
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| where IpAddress != "-"
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend 
+    Country = tostring(GeoInfo.country),
+    Continent = case(
+        GeoInfo.country in ("United States", "Canada", "Mexico"), "North America",
+        GeoInfo.country in ("Brazil", "Argentina", "Colombia", "Chile"), "South America",
+        GeoInfo.country in ("United Kingdom", "Germany", "France", "Netherlands", "Russia", "Poland", "Romania", "Bulgaria"), "Europe",
+        GeoInfo.country in ("China", "India", "Japan", "South Korea", "Vietnam", "Indonesia", "Thailand"), "Asia",
+        GeoInfo.country in ("Australia", "New Zealand"), "Oceania",
+        GeoInfo.country in ("South Africa", "Nigeria", "Egypt", "Morocco"), "Africa",
+        "Other"
+    )
+| summarize Attacks = count() by Continent, Country
+| order by Attacks desc
+
+//=============================================================================
+// QUERY 8: IP Reputation Summary (Table)
+// Aggregate view of attacking IPs with attack intensity
+//=============================================================================
+SecurityEvent
+| where TimeGenerated {TimeRange}
+| where EventID == 4625
+| where IpAddress != "-"
+| summarize 
+    TotalAttempts = count(),
+    UniqueAccounts = dcount(TargetUserName),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated),
+    TargetComputers = dcount(Computer)
+    by IpAddress
+| extend GeoInfo = geo_info_from_ip_address(IpAddress)
+| extend 
+    Country = tostring(GeoInfo.country),
+    City = tostring(GeoInfo.city),
+    ISP = tostring(GeoInfo.isp)
+| extend 
+    AttackDuration = LastSeen - FirstSeen,
+    ThreatLevel = case(
+        TotalAttempts >= 100, "Critical",
+        TotalAttempts >= 50, "High",
+        TotalAttempts >= 20, "Medium",
+        "Low"
+    )
+| project 
+    IpAddress,
+    Country,
+    City,
+    TotalAttempts,
+    UniqueAccounts,
+    TargetComputers,
+    AttackDuration,
+    ThreatLevel,
+    FirstSeen,
+    LastSeen
+| order by TotalAttempts desc
+| take 50

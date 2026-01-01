@@ -1,0 +1,86 @@
+// Rare Processes Hunting Query
+// Identifies processes that have only run a few times, which may indicate malware or unauthorized tools
+// MITRE ATT&CK: T1059 - Command and Scripting Interpreter
+// MITRE ATT&CK: T1204 - User Execution
+// Author: SOC Lab
+// Use Case: Identify unusual or rare process executions
+
+let LookbackDays = 7;
+let RarityThreshold = 5;  // Processes run 5 or fewer times
+
+SecurityEvent
+| where TimeGenerated > ago(LookbackDays * 1d)
+| where EventID == 4688  // Process creation
+| where isnotempty(NewProcessName)
+// Exclude common system paths
+| where NewProcessName !has ":\\Windows\\System32\\"
+| where NewProcessName !has ":\\Windows\\SysWOW64\\"
+| where NewProcessName !has ":\\Windows\\WinSxS\\"
+| where NewProcessName !has ":\\Windows\\servicing\\"
+| where NewProcessName !has ":\\Windows\\Microsoft.NET\\"
+// Exclude common application paths (adjust as needed)
+| where NewProcessName !has ":\\Program Files\\Microsoft"
+| where NewProcessName !has ":\\Program Files (x86)\\Microsoft"
+| where NewProcessName !has ":\\Program Files\\Windows"
+| where NewProcessName !has "\\AppData\\Local\\Microsoft\\"
+// Extract just the filename
+| extend ProcessFileName = tostring(split(NewProcessName, "\\")[-1])
+| summarize 
+    ExecutionCount = count(),
+    UniqueAccounts = dcount(Account),
+    Accounts = make_set(Account, 10),
+    UniqueComputers = dcount(Computer),
+    Computers = make_set(Computer, 5),
+    FirstSeen = min(TimeGenerated),
+    LastSeen = max(TimeGenerated),
+    CommandLines = make_set(CommandLine, 5),
+    ParentProcesses = make_set(ParentProcessName, 5)
+    by NewProcessName, ProcessFileName
+| where ExecutionCount <= RarityThreshold
+| extend 
+    DaysSinceFirstSeen = datetime_diff('day', now(), FirstSeen),
+    RiskIndicators = pack(
+        "ExecutedOnMultipleComputers", UniqueComputers > 1,
+        "ExecutedByMultipleAccounts", UniqueAccounts > 1,
+        "NewlyObserved", DaysSinceFirstSeen <= 1,
+        "SuspiciousPath", NewProcessName has_any ("\\Temp\\", "\\Downloads\\", "\\AppData\\Local\\Temp\\", "\\Public\\")
+    )
+| extend RiskScore = toint(UniqueComputers > 1) 
+                   + toint(UniqueAccounts > 1) * 2 
+                   + toint(DaysSinceFirstSeen <= 1) * 3
+                   + toint(NewProcessName has_any ("\\Temp\\", "\\Downloads\\", "\\AppData\\Local\\Temp\\")) * 2
+| where RiskScore >= 1  // Filter out completely benign rare processes
+| project 
+    ProcessFileName,
+    FullPath = NewProcessName,
+    ExecutionCount,
+    UniqueAccounts,
+    UniqueComputers,
+    Computers,
+    FirstSeen,
+    LastSeen,
+    DaysSinceFirstSeen,
+    RiskScore,
+    ParentProcesses,
+    CommandLines
+| order by RiskScore desc, ExecutionCount asc
+
+
+// Additional: Find processes with suspicious names
+// Uncomment to identify potentially malicious process names
+/*
+SecurityEvent
+| where TimeGenerated > ago(7d)
+| where EventID == 4688
+| extend ProcessFileName = tostring(split(NewProcessName, "\\")[-1])
+| where ProcessFileName matches regex @"^[a-z]{8}\.exe$"  // 8 random letters - common malware pattern
+    or ProcessFileName matches regex @"^[A-Za-z0-9]{32}\.exe$"  // Hash-like names
+    or ProcessFileName has_any ("svchost2", "svchosts", "csrss1", "lsass2")  // Mimicking system processes
+    or ProcessFileName matches regex @"\s+\.exe$"  // Spaces before extension
+| summarize 
+    count(),
+    Accounts = make_set(Account),
+    Computers = make_set(Computer)
+    by ProcessFileName, NewProcessName
+| order by count_ desc
+*/

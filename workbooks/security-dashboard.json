@@ -1,0 +1,343 @@
+{
+    "version": "Notebook/1.0",
+    "items": [
+        {
+            "type": 1,
+            "content": {
+                "json": "# 🛡️ SOC Security Dashboard\n\nWelcome to the Security Operations Center dashboard for the Azure Sentinel SOC Lab.\n\n---"
+            },
+            "name": "title"
+        },
+        {
+            "type": 9,
+            "content": {
+                "version": "KqlParameterItem/1.0",
+                "parameters": [
+                    {
+                        "id": "timeRange",
+                        "version": "KqlParameterItem/1.0",
+                        "name": "TimeRange",
+                        "label": "Time Range",
+                        "type": 4,
+                        "isRequired": true,
+                        "value": {
+                            "durationMs": 86400000
+                        },
+                        "typeSettings": {
+                            "selectableValues": [
+                                {"durationMs": 3600000, "displayText": "Last 1 hour"},
+                                {"durationMs": 14400000, "displayText": "Last 4 hours"},
+                                {"durationMs": 86400000, "displayText": "Last 24 hours"},
+                                {"durationMs": 604800000, "displayText": "Last 7 days"},
+                                {"durationMs": 2592000000, "displayText": "Last 30 days"}
+                            ]
+                        }
+                    }
+                ],
+                "style": "pills"
+            },
+            "name": "parameters"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityEvent\n| where TimeGenerated {TimeRange}\n| where EventID == 4625\n| summarize Value = count()",
+                "size": 4,
+                "title": "Failed Logins",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "tiles",
+                "tileSettings": {
+                    "titleContent": {
+                        "columnMatch": "Value",
+                        "formatter": 12,
+                        "formatOptions": {
+                            "palette": "redDark"
+                        }
+                    },
+                    "showBorder": true
+                }
+            },
+            "customWidth": "25",
+            "name": "failed-logins-tile"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityEvent\n| where TimeGenerated {TimeRange}\n| where EventID == 4624\n| where LogonType in (2, 10)\n| summarize Value = count()",
+                "size": 4,
+                "title": "Successful Logins",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "tiles",
+                "tileSettings": {
+                    "titleContent": {
+                        "columnMatch": "Value",
+                        "formatter": 12,
+                        "formatOptions": {
+                            "palette": "greenDark"
+                        }
+                    },
+                    "showBorder": true
+                }
+            },
+            "customWidth": "25",
+            "name": "successful-logins-tile"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityEvent\n| where TimeGenerated {TimeRange}\n| where EventID == 4625\n| where IpAddress != \"-\"\n| summarize Value = dcount(IpAddress)",
+                "size": 4,
+                "title": "Unique Attackers",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "tiles",
+                "tileSettings": {
+                    "titleContent": {
+                        "columnMatch": "Value",
+                        "formatter": 12,
+                        "formatOptions": {
+                            "palette": "orange"
+                        }
+                    },
+                    "showBorder": true
+                }
+            },
+            "customWidth": "25",
+            "name": "unique-attackers-tile"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityIncident\n| where TimeGenerated {TimeRange}\n| where Status in (\"New\", \"Active\")\n| summarize Value = count()",
+                "size": 4,
+                "title": "Active Incidents",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "tiles",
+                "tileSettings": {
+                    "titleContent": {
+                        "columnMatch": "Value",
+                        "formatter": 12,
+                        "formatOptions": {
+                            "palette": "blue"
+                        }
+                    },
+                    "showBorder": true
+                }
+            },
+            "customWidth": "25",
+            "name": "active-incidents-tile"
+        },
+        {
+            "type": 1,
+            "content": {
+                "json": "---\n## 📈 Login Attempts Over Time"
+            },
+            "name": "section-timeline"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityEvent\n| where TimeGenerated {TimeRange}\n| where EventID in (4624, 4625)\n| summarize \n    SuccessfulLogins = countif(EventID == 4624 and LogonType in (2, 10)),\n    FailedLogins = countif(EventID == 4625)\n    by bin(TimeGenerated, 1h)\n| order by TimeGenerated asc",
+                "size": 0,
+                "title": "Login Attempts Timeline",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "areachart",
+                "chartSettings": {
+                    "seriesLabelSettings": [
+                        {"seriesName": "FailedLogins", "color": "redBright"},
+                        {"seriesName": "SuccessfulLogins", "color": "green"}
+                    ]
+                }
+            },
+            "name": "login-timeline"
+        },
+        {
+            "type": 1,
+            "content": {
+                "json": "---\n## 🗺️ Attack Origins Map"
+            },
+            "name": "section-map"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityEvent\n| where TimeGenerated {TimeRange}\n| where EventID == 4625\n| where IpAddress != \"-\"\n| where IpAddress !startswith \"10.\"\n| where IpAddress !startswith \"192.168.\"\n| where IpAddress !startswith \"172.16.\"\n| summarize AttackCount = count() by IpAddress\n| top 200 by AttackCount\n| extend GeoInfo = geo_info_from_ip_address(IpAddress)\n| extend \n    Country = tostring(GeoInfo.country),\n    City = tostring(GeoInfo.city),\n    Latitude = toreal(GeoInfo.latitude),\n    Longitude = toreal(GeoInfo.longitude)\n| where isnotempty(Latitude) and isnotempty(Longitude)\n| project IpAddress, AttackCount, Country, City, Latitude, Longitude",
+                "size": 0,
+                "title": "Geographic Distribution of Attacks",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "map",
+                "mapSettings": {
+                    "locInfo": "LatLong",
+                    "latitude": "Latitude",
+                    "longitude": "Longitude",
+                    "sizeSettings": "AttackCount",
+                    "sizeAggregation": "Sum",
+                    "labelSettings": "Country",
+                    "legendMetric": "AttackCount",
+                    "legendAggregation": "Sum",
+                    "itemColorSettings": {
+                        "type": "heatmap",
+                        "colorAggregation": "Sum",
+                        "nodeColorField": "AttackCount",
+                        "heatmapPalette": "greenRed"
+                    }
+                }
+            },
+            "name": "attack-map"
+        },
+        {
+            "type": 1,
+            "content": {
+                "json": "---\n## 📊 Top Attackers & Targets"
+            },
+            "name": "section-tables"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityEvent\n| where TimeGenerated {TimeRange}\n| where EventID == 4625\n| where IpAddress != \"-\"\n| summarize \n    Attempts = count(),\n    TargetAccounts = dcount(TargetUserName),\n    FirstSeen = min(TimeGenerated),\n    LastSeen = max(TimeGenerated)\n    by IpAddress\n| extend GeoInfo = geo_info_from_ip_address(IpAddress)\n| extend Country = tostring(GeoInfo.country)\n| top 10 by Attempts desc\n| project IpAddress, Country, Attempts, TargetAccounts, FirstSeen, LastSeen",
+                "size": 0,
+                "title": "Top 10 Attacking IPs",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "table",
+                "gridSettings": {
+                    "formatters": [
+                        {
+                            "columnMatch": "Attempts",
+                            "formatter": 4,
+                            "formatOptions": {
+                                "palette": "redBright"
+                            }
+                        }
+                    ]
+                }
+            },
+            "customWidth": "50",
+            "name": "top-attackers-table"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityEvent\n| where TimeGenerated {TimeRange}\n| where EventID == 4625\n| summarize AttackCount = count() by TargetUserName\n| top 10 by AttackCount desc",
+                "size": 0,
+                "title": "Most Targeted Accounts",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "barchart",
+                "chartSettings": {
+                    "xAxis": "TargetUserName",
+                    "yAxis": ["AttackCount"],
+                    "seriesLabelSettings": [
+                        {"seriesName": "AttackCount", "color": "orange"}
+                    ]
+                }
+            },
+            "customWidth": "50",
+            "name": "targeted-accounts-chart"
+        },
+        {
+            "type": 1,
+            "content": {
+                "json": "---\n## 🔐 Incidents Summary"
+            },
+            "name": "section-incidents"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityIncident\n| where TimeGenerated {TimeRange}\n| summarize Count = count() by Severity\n| order by case(Severity == \"High\", 1, Severity == \"Medium\", 2, Severity == \"Low\", 3, 4) asc",
+                "size": 0,
+                "title": "Incidents by Severity",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "piechart",
+                "chartSettings": {
+                    "seriesLabelSettings": [
+                        {"seriesName": "High", "color": "redBright"},
+                        {"seriesName": "Medium", "color": "orange"},
+                        {"seriesName": "Low", "color": "yellow"},
+                        {"seriesName": "Informational", "color": "blue"}
+                    ]
+                }
+            },
+            "customWidth": "50",
+            "name": "incidents-by-severity"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "SecurityIncident\n| where TimeGenerated {TimeRange}\n| project TimeGenerated, Title, Severity, Status, Owner = OwnerName, AlertCount = AlertsCount\n| order by TimeGenerated desc\n| take 10",
+                "size": 0,
+                "title": "Recent Incidents",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "table",
+                "gridSettings": {
+                    "formatters": [
+                        {
+                            "columnMatch": "Severity",
+                            "formatter": 18,
+                            "formatOptions": {
+                                "thresholdsOptions": "colors",
+                                "thresholdsGrid": [
+                                    {"operator": "==", "thresholdValue": "High", "representation": "redBright", "text": "{0}{1}"},
+                                    {"operator": "==", "thresholdValue": "Medium", "representation": "orange", "text": "{0}{1}"},
+                                    {"operator": "==", "thresholdValue": "Low", "representation": "yellow", "text": "{0}{1}"},
+                                    {"operator": "Default", "representation": "blue", "text": "{0}{1}"}
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "customWidth": "50",
+            "name": "recent-incidents-table"
+        },
+        {
+            "type": 1,
+            "content": {
+                "json": "---\n## 📉 Data Ingestion"
+            },
+            "name": "section-data"
+        },
+        {
+            "type": 3,
+            "content": {
+                "version": "KqlItem/1.0",
+                "query": "Usage\n| where TimeGenerated {TimeRange}\n| where DataType in (\"SecurityEvent\", \"SigninLogs\", \"AuditLogs\", \"AzureActivity\")\n| summarize DataMB = sum(Quantity) by bin(TimeGenerated, 1d), DataType\n| order by TimeGenerated asc",
+                "size": 0,
+                "title": "Daily Data Ingestion by Type",
+                "queryType": 0,
+                "resourceType": "microsoft.operationalinsights/workspaces",
+                "visualization": "barchart"
+            },
+            "name": "data-ingestion-chart"
+        },
+        {
+            "type": 1,
+            "content": {
+                "json": "---\n\n**Dashboard created for Azure Sentinel SOC Lab**\n\n*Last updated: Use the time range selector above to adjust the view*"
+            },
+            "name": "footer"
+        }
+    ],
+    "fallbackResourceIds": [],
+    "fromTemplateId": "SOC-Lab-Security-Dashboard",
+    "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}

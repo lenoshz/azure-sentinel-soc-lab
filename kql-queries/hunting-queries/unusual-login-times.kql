@@ -1,0 +1,80 @@
+// Unusual Login Times Hunting Query
+// Detects successful logins outside normal business hours
+// MITRE ATT&CK: T1078 - Valid Accounts
+// Author: SOC Lab
+// Use Case: Identify potential unauthorized access during off-hours
+
+let BusinessHoursStart = 6;  // 6 AM
+let BusinessHoursEnd = 22;   // 10 PM
+let LookbackDays = 7;
+
+SecurityEvent
+| where TimeGenerated > ago(LookbackDays * 1d)
+| where EventID == 4624  // Successful logon
+| where LogonType in (2, 10)  // Interactive (2) or RDP (10)
+| extend 
+    HourOfDay = datetime_part("hour", TimeGenerated),
+    DayOfWeek = dayofweek(TimeGenerated),
+    DayName = case(
+        dayofweek(TimeGenerated) == 0d, "Sunday",
+        dayofweek(TimeGenerated) == 1d, "Monday",
+        dayofweek(TimeGenerated) == 2d, "Tuesday",
+        dayofweek(TimeGenerated) == 3d, "Wednesday",
+        dayofweek(TimeGenerated) == 4d, "Thursday",
+        dayofweek(TimeGenerated) == 5d, "Friday",
+        dayofweek(TimeGenerated) == 6d, "Saturday",
+        "Unknown"
+    )
+| where HourOfDay < BusinessHoursStart or HourOfDay >= BusinessHoursEnd
+| summarize 
+    LoginCount = count(),
+    Accounts = make_set(TargetUserName, 10),
+    SourceIPs = make_set(IpAddress, 10),
+    LogonTypes = make_set(LogonType),
+    FirstLogin = min(TimeGenerated),
+    LastLogin = max(TimeGenerated),
+    DaysWithActivity = dcount(bin(TimeGenerated, 1d))
+    by Computer, HourOfDay, DayName
+| extend 
+    TimeCategory = case(
+        HourOfDay >= 0 and HourOfDay < 6, "Night (12AM-6AM)",
+        HourOfDay >= 22 and HourOfDay <= 23, "Late Evening (10PM-12AM)",
+        "Off-Hours"
+    ),
+    RiskLevel = case(
+        HourOfDay >= 0 and HourOfDay < 4, "High",
+        DaysWithActivity > 3, "Medium",
+        "Low"
+    )
+| project 
+    Computer,
+    TimeCategory,
+    HourOfDay,
+    DayName,
+    LoginCount,
+    Accounts,
+    SourceIPs,
+    DaysWithActivity,
+    FirstLogin,
+    LastLogin,
+    RiskLevel
+| order by LoginCount desc
+
+
+// Weekend-specific query
+// Uncomment to focus only on weekend activity
+/*
+SecurityEvent
+| where TimeGenerated > ago(30d)
+| where EventID == 4624
+| where LogonType in (2, 10)
+| extend DayOfWeek = dayofweek(TimeGenerated)
+| where DayOfWeek == 0d or DayOfWeek == 6d  // Sunday or Saturday
+| summarize 
+    WeekendLogins = count(),
+    Accounts = make_set(TargetUserName),
+    IPs = make_set(IpAddress)
+    by Computer
+| where WeekendLogins > 5
+| order by WeekendLogins desc
+*/

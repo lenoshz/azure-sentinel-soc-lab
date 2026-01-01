@@ -1,0 +1,123 @@
+// Suspicious PowerShell Execution Detection
+// Detects PowerShell commands with characteristics commonly seen in attacks
+// MITRE ATT&CK: T1059.001 - Command and Scripting Interpreter: PowerShell
+// Severity: Medium-High
+// Frequency: Run every 5 minutes
+
+SecurityEvent
+| where TimeGenerated > ago(1h)
+| where EventID == 4688  // Process creation
+| where NewProcessName has_any ("powershell.exe", "pwsh.exe")
+| extend 
+    // Encoding and obfuscation
+    HasEncodedCommand = CommandLine has_any ("-enc", "-EncodedCommand", "-e "),
+    HasBase64 = CommandLine matches regex @"[A-Za-z0-9+/=]{50,}",
+    
+    // Execution policy bypass
+    HasBypass = CommandLine has_any (
+        "-ep bypass",
+        "-ExecutionPolicy bypass",
+        "-exec bypass",
+        "Set-ExecutionPolicy Bypass"
+    ),
+    
+    // Hidden execution
+    HasHidden = CommandLine has_any (
+        "-w hidden",
+        "-WindowStyle hidden",
+        "-nop",
+        "-NoProfile"
+    ),
+    
+    // Download/Execute patterns
+    HasDownload = CommandLine has_any (
+        "downloadstring",
+        "downloadfile",
+        "Net.WebClient",
+        "Invoke-WebRequest",
+        "iwr ",
+        "curl ",
+        "wget ",
+        "Start-BitsTransfer",
+        "DownloadData"
+    ),
+    
+    // Invoke patterns
+    HasInvoke = CommandLine has_any (
+        "IEX",
+        "Invoke-Expression",
+        "Invoke-Command",
+        "icm "
+    ),
+    
+    // Credential theft
+    HasCredTheft = CommandLine has_any (
+        "Mimikatz",
+        "sekurlsa",
+        "Get-Credential",
+        "ConvertTo-SecureString",
+        "System.Security.Cryptography"
+    ),
+    
+    // Reconnaissance
+    HasRecon = CommandLine has_any (
+        "Get-ADUser",
+        "Get-ADComputer",
+        "Get-ADGroup",
+        "Get-WmiObject",
+        "Get-Process",
+        "Get-Service",
+        "systeminfo",
+        "whoami /all"
+    ),
+    
+    // Common attack tools
+    HasAttackTool = CommandLine has_any (
+        "Invoke-Mimikatz",
+        "Invoke-Kerberoast",
+        "Invoke-BloodHound",
+        "PowerView",
+        "PowerUp",
+        "Invoke-SMBExec",
+        "Invoke-WMIExec",
+        "Invoke-PsExec",
+        "Empire",
+        "Covenant"
+    )
+| extend 
+    RiskScore = toint(HasEncodedCommand) * 3 
+             + toint(HasBase64) * 3
+             + toint(HasBypass) * 2 
+             + toint(HasHidden) * 2 
+             + toint(HasDownload) * 3 
+             + toint(HasInvoke) * 2
+             + toint(HasCredTheft) * 4
+             + toint(HasRecon) * 1
+             + toint(HasAttackTool) * 5
+| where RiskScore >= 3
+| extend Severity = case(
+    RiskScore >= 8, "Critical",
+    RiskScore >= 5, "High",
+    RiskScore >= 3, "Medium",
+    "Low"
+)
+| project 
+    TimeGenerated,
+    Computer,
+    Account,
+    ParentProcess = ParentProcessName,
+    ProcessName = NewProcessName,
+    CommandLine,
+    RiskScore,
+    Severity,
+    Indicators = pack(
+        "EncodedCommand", HasEncodedCommand,
+        "Bypass", HasBypass,
+        "Hidden", HasHidden,
+        "Download", HasDownload,
+        "Invoke", HasInvoke,
+        "CredentialTheft", HasCredTheft,
+        "Reconnaissance", HasRecon,
+        "AttackTool", HasAttackTool
+    )
+| order by RiskScore desc, TimeGenerated desc

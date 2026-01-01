@@ -1,0 +1,84 @@
+// Privilege Escalation Detection
+// Detects when users are added to sensitive administrator groups
+// MITRE ATT&CK: T1078.004 - Valid Accounts: Cloud Accounts
+// MITRE ATT&CK: T1098 - Account Manipulation
+// Severity: High
+// Frequency: Run every 5 minutes
+
+// Detection 1: User added to sensitive local groups
+SecurityEvent
+| where TimeGenerated > ago(1h)
+| where EventID == 4732  // User added to security-enabled local group
+| where TargetUserName has_any (
+    "Administrators",
+    "Admin",
+    "Domain Admins",
+    "Enterprise Admins",
+    "Schema Admins",
+    "Account Operators",
+    "Server Operators",
+    "Backup Operators",
+    "Print Operators",
+    "Remote Desktop Users",
+    "DnsAdmins"
+)
+| project 
+    TimeGenerated,
+    Computer,
+    TargetGroup = TargetUserName,
+    AddedUser = MemberName,
+    AddedBy = SubjectUserName,
+    AddedByDomain = SubjectDomainName,
+    EventID
+| extend AlertTitle = strcat("User ", AddedUser, " added to sensitive group: ", TargetGroup)
+
+// UNION with Azure AD role changes (if Azure AD logs available)
+| union (
+    AuditLogs
+    | where TimeGenerated > ago(1h)
+    | where OperationName has_any (
+        "Add member to role",
+        "Add eligible member to role",
+        "Add scoped member to role"
+    )
+    | where Result == "success"
+    | extend 
+        TargetRole = tostring(TargetResources[0].displayName),
+        AddedUser = tostring(TargetResources[0].userPrincipalName),
+        AddedBy = tostring(InitiatedBy.user.userPrincipalName)
+    | where TargetRole has_any (
+        "Global Administrator",
+        "Privileged Role Administrator",
+        "User Administrator",
+        "Exchange Administrator",
+        "Security Administrator",
+        "Conditional Access Administrator"
+    )
+    | project 
+        TimeGenerated,
+        Computer = "Azure AD",
+        TargetGroup = TargetRole,
+        AddedUser,
+        AddedBy,
+        AddedByDomain = "Azure AD",
+        EventID = "AuditLog"
+    | extend AlertTitle = strcat("User ", AddedUser, " added to Azure AD role: ", TargetGroup)
+)
+| order by TimeGenerated desc
+
+// Detection 2: Local admin account created
+| union (
+    SecurityEvent
+    | where TimeGenerated > ago(1h)
+    | where EventID == 4720  // User account created
+    | project 
+        TimeGenerated,
+        Computer,
+        TargetGroup = "New Account Created",
+        AddedUser = TargetUserName,
+        AddedBy = SubjectUserName,
+        AddedByDomain = SubjectDomainName,
+        EventID = tostring(EventID)
+    | extend AlertTitle = strcat("New account created: ", AddedUser)
+)
+| order by TimeGenerated desc

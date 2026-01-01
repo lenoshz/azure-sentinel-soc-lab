@@ -1,0 +1,35 @@
+// RDP Brute Force Detection
+// Detects multiple failed RDP login attempts from a single IP address
+// MITRE ATT&CK: T1110.001 - Brute Force: Password Guessing
+// Severity: High
+// Frequency: Run every 5 minutes
+
+SecurityEvent
+| where TimeGenerated > ago(5m)
+| where EventID == 4625  // Failed logon
+| where LogonType == 10  // RDP (RemoteInteractive)
+| summarize 
+    FailedAttempts = count(),
+    TargetAccounts = make_set(TargetUserName),
+    AccountCount = dcount(TargetUserName),
+    FirstAttempt = min(TimeGenerated),
+    LastAttempt = max(TimeGenerated)
+    by IpAddress, Computer
+| where FailedAttempts >= 10
+| extend 
+    AttackDuration = LastAttempt - FirstAttempt,
+    Severity = case(
+        FailedAttempts >= 50, "High",
+        FailedAttempts >= 25, "Medium",
+        "Low"
+    )
+| project 
+    TimeGenerated = LastAttempt,
+    IpAddress,
+    Computer,
+    FailedAttempts,
+    TargetAccounts,
+    AccountCount,
+    AttackDuration,
+    Severity
+| order by FailedAttempts desc
