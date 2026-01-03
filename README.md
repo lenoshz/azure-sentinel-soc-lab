@@ -52,7 +52,7 @@ This project implements an enterprise-grade SIEM solution using Microsoft Azure 
 
 ## 🏗️ Architecture
 
-<img width="700" height="500" alt="architecture drawio (1)" src="https://github.com/user-attachments/assets/ef14aef2-ddac-4538-b94e-9eb14be94fc7" />
+<img width="700" height="600" alt="architecture2 drawio" src="https://github.com/user-attachments/assets/f7a8880a-846d-4a73-a611-f96d0034569c" />
 
 
 📄 **Detailed architecture documentation:** [docs/architecture.md](docs/architecture.md)
@@ -192,7 +192,7 @@ azure-sentinel-soc-lab/
 
 ### Prerequisites
 
-- Azure subscription with Sentinel access (Azure Student $100 credit works!)
+- Azure subscription with Sentinel access
 - VS Code with Azure extensions
 - PowerShell 7+
 - Git
@@ -253,46 +253,10 @@ SecurityEvent
 
 ### Block Malicious IP Workflow
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Sentinel  │────▶│ Logic App   │────▶│ Check       │────▶│ Block IP    │
-│   Alert     │     │ Triggered   │     │ Reputation  │     │ in NSG      │
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-                                                                   │
-                                                                   ▼
-                                                            ┌─────────────┐
-                                                            │ Notify SOC  │
-                                                            │ Team        │
-                                                            └─────────────┘
-```
+<img width="600" height="500" alt="Untitled Diagram drawio (2)" src="https://github.com/user-attachments/assets/16fcfd55-79ac-4bef-8a6e-3a7dc7e84c9b" />
+
 
 📁 **All playbooks:** [playbooks/logic-apps/](playbooks/logic-apps/)
-
----
-
-## 💰 Cost Management
-
-This project is designed to run within Azure Student $100 credits.
-
-### Estimated Monthly Cost
-
-| Resource | Cost | Notes |
-|----------|------|-------|
-| Log Analytics | FREE | First 5GB/day free |
-| Azure Sentinel | FREE | First 10GB/day (31 days trial) |
-| Windows VM (B1s) | ~$8-10 | Use auto-shutdown! |
-| Storage | ~$1-2 | Minimal usage |
-| **Total** | **~$10-15/month** | Well within $100 credit |
-
-### Cost Saving Tips
-
-- ✅ Enable VM auto-shutdown (saves 50%+)
-- ✅ Use B1s VM size (smallest)
-- ✅ Set budget alerts at $20, $50, $80
-- ✅ Delete resources when not in use
-- ✅ Monitor costs daily during setup
-
-📖 **Detailed cost guide:** [docs/08-cost-management.md](docs/08-cost-management.md)
 
 ---
 
@@ -306,17 +270,6 @@ This project is designed to run within Azure Student $100 credits.
 
 ### Incident Investigation
 *Coming soon - Alert triage and investigation workflow*
-
----
-
-## 🔮 Future Enhancements
-
-- [ ] Linux honeypot integration
-- [ ] File Integrity Monitoring (FIM)
-- [ ] Custom threat intelligence feeds
-- [ ] UEBA (User Entity Behavior Analytics)
-- [ ] Automated reporting (weekly/monthly)
-- [ ] Integration with ticketing systems
 
 ---
 
@@ -337,31 +290,6 @@ This project is designed to run within Azure Student $100 credits.
 
 ---
 
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to:
-- Report bugs
-- Suggest new detection rules
-- Improve documentation
-- Add new automation playbooks
-
----
-
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 👤 Author
-
-**oznekcyber**
-
-- GitHub: [@oznekcyber](https://github.com/oznekcyber)
-
----
-
-<p align="center">
-  <b>Built for learning SOC analyst skills through hands-on experience</b><br>
-  ⭐ Star this repo if you find it helpful!
-</p>
