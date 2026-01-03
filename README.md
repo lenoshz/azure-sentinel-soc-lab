@@ -52,58 +52,8 @@ This project implements an enterprise-grade SIEM solution using Microsoft Azure 
 
 ## 🏗️ Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              AZURE CLOUD                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐          │
-│  │  Windows VM     │    │   Azure AD      │    │  Network        │          │
-│  │  (Honeypot)     │    │   Sign-in Logs  │    │  Security Group │          │
-│  │  RDP Exposed    │    │                 │    │  Flow Logs      │          │
-│  └────────┬────────┘    └────────┬────────┘    └────────┬────────┘          │
-│           │                      │                      │                    │
-│           └──────────────────────┼──────────────────────┘                    │
-│                                  │                                           │
-│                                  ▼                                           │
-│                    ┌─────────────────────────┐                               │
-│                    │   LOG ANALYTICS         │                               │
-│                    │   WORKSPACE             │                               │
-│                    │   (Data Collection)     │                               │
-│                    └────────────┬────────────┘                               │
-│                                 │                                            │
-│                                 ▼                                            │
-│                    ┌─────────────────────────┐                               │
-│                    │   AZURE SENTINEL        │                               │
-│                    │   (SIEM/SOAR)           │                               │
-│                    │                         │                               │
-│                    │  ┌─────────────────┐    │                               │
-│                    │  │ Analytics Rules │    │    ┌─────────────────┐        │
-│                    │  │ (KQL Detection) │────┼───▶│ Logic Apps      │        │
-│                    │  └─────────────────┘    │    │ (Auto Response) │        │
-│                    │                         │    └─────────────────┘        │
-│                    │  ┌─────────────────┐    │             │                 │
-│                    │  │ Workbooks       │    │             ▼                 │
-│                    │  │ (Dashboards)    │    │    ┌─────────────────┐        │
-│                    │  └─────────────────┘    │    │ Email/Teams     │        │
-│                    │                         │    │ Notifications   │        │
-│                    │  ┌─────────────────┐    │    └─────────────────┘        │
-│                    │  │ Threat Intel    │    │                               │
-│                    │  │ (VirusTotal,    │    │                               │
-│                    │  │  AbuseIPDB)     │    │                               │
-│                    │  └─────────────────┘    │                               │
-│                    └─────────────────────────┘                               │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+<img width="700" height="500" alt="architecture drawio (1)" src="https://github.com/user-attachments/assets/ef14aef2-ddac-4538-b94e-9eb14be94fc7" />
 
-                    ┌─────────────────────────┐
-                    │   EXTERNAL ATTACKERS    │
-                    │   (Internet)            │
-                    │   - RDP Brute Force     │
-                    │   - Port Scanning       │
-                    │   - Credential Attacks  │
-                    └─────────────────────────┘
-```
 
 📄 **Detailed architecture documentation:** [docs/architecture.md](docs/architecture.md)
 
